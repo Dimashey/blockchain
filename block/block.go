@@ -25,3 +25,7 @@ func CreateBlock(data string, prevHash []byte) *Block {
 
 	return block
 }
+
+func Genesis() *Block {
+	return CreateBlock("Genesis", []byte{})
+}
