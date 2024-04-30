@@ -12,7 +12,8 @@ type Chain struct {
 	Database *badger.DB
 }
 
-func (c *Chain) AddBlock(data string) {
+func (c *Chain) lastHash() ([]byte, error) {
+
 	var lastHash []byte
 
 	err := c.Database.View(func(txn *badger.Txn) error {
@@ -24,6 +25,16 @@ func (c *Chain) AddBlock(data string) {
 
 		return err
 	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return lastHash, nil
+}
+
+func (c *Chain) AddBlock(data string) {
+	lastHash, err := c.lastHash()
 
 	util.HandleError(err)
 
