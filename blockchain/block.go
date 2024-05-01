@@ -11,7 +11,8 @@ type Block struct {
 	Hash     []byte
 	Data     []byte
 	PrevHash []byte
-	Nonce    int
+	// Nonce is value used to calucalte hash to PoW paradigm
+	Nonce int
 }
 
 func CreateBlock(data string, prevHash []byte) *Block {

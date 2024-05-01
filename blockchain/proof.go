@@ -20,6 +20,7 @@ type ProofOfWork struct {
 func NewProof(b *Block) *ProofOfWork {
 	target := big.NewInt(1)
 
+	// multiply target value by two
 	target.Lsh(target, uint(256-Difficulty))
 
 	pow := &ProofOfWork{b, target}

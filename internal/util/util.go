@@ -6,6 +6,7 @@ import (
 	"log"
 )
 
+// ToHex converts int to hexidecimal format
 func ToHex(num int64) []byte {
 	buff := new(bytes.Buffer)
 
