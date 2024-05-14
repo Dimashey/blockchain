@@ -211,6 +211,10 @@ func (c *Chain) FindUTXO(address string) []TxOutput {
 	return utxos
 }
 
+// FindSpendableOutputs recieve address to which token should be sent and amount of token
+// returns accumlated values of tokens which can be sent, and UTXOs
+// For example 6 tokens should be sent and sum all of UTXO is 7
+// So accumulated is equal to 7
 func (c *Chain) FindSpendableOutputs(address string, amount int) (int, map[string][]int) {
 	unspentOuts := make(map[string][]int)
 	unspentTxs := c.FindUnspentTransactions(address)
