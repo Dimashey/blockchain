@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/Dimashey/blockchain/blockchain"
+	"github.com/Dimashey/blockchain/wallet"
 )
 
 type CommandLine struct{}
@@ -23,6 +24,8 @@ func (cli *CommandLine) printUsage() {
 	fmt.Println(" createblockchain -address ADDRESS creates a blockchain and sends genesis reward to address")
 	fmt.Println(" printchain - Prints the blocks in the chain")
 	fmt.Println(" send -from FROM -to TO -ammount - Send amount of coins")
+	fmt.Println(" createwallet - Creates a new Wallet")
+	fmt.Println(" listaddresses - List the addresses in our wallet file")
 }
 
 func (cli *CommandLine) validateArgs() {
@@ -84,6 +87,23 @@ func (cli *CommandLine) send(from, to string, amount int) {
 	fmt.Println("Success!")
 }
 
+func (cli *CommandLine) listAddresses() {
+	wallets, _ := wallet.CreateWallets()
+	addresses := wallets.GetAllAddresses()
+
+	for _, address := range addresses {
+		fmt.Println(address)
+	}
+}
+
+func (cli *CommandLine) createWallet() {
+	wallets, _ := wallet.CreateWallets()
+	address := wallets.AddWallet()
+	wallets.SaveFile()
+
+	fmt.Printf("New address is: %s\n", address)
+}
+
 func (cli *CommandLine) Run() {
 	cli.validateArgs()
 
@@ -97,6 +117,8 @@ func (cli *CommandLine) Run() {
 	sendFrom := sendCmd.String("from", "", "Source wallet address")
 	sendTo := sendCmd.String("to", "", "Destination wallet address")
 	sendAmount := sendCmd.Int("amount", 0, "Amount to send")
+	createWalletCmd := flag.NewFlagSet("createwallet", flag.ExitOnError)
+	listAddressesCmd := flag.NewFlagSet("listaddresses", flag.ExitOnError)
 
 	switch os.Args[1] {
 	case "getbalance":
@@ -116,6 +138,16 @@ func (cli *CommandLine) Run() {
 		}
 	case "send":
 		err := sendCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
+	case "createwallet":
+		err := createWalletCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
+	case "listaddresses":
+		err := listAddressesCmd.Parse(os.Args[2:])
 		if err != nil {
 			log.Panic(err)
 		}
@@ -152,5 +184,13 @@ func (cli *CommandLine) Run() {
 		}
 
 		cli.send(*sendFrom, *sendTo, *sendAmount)
+	}
+
+	if createWalletCmd.Parsed() {
+		cli.createWallet()
+	}
+
+	if listAddressesCmd.Parsed() {
+		cli.listAddresses()
 	}
 }
