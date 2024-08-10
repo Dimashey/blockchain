@@ -45,7 +45,7 @@ func (c *Chain) lastHash() ([]byte, error) {
 	return lastHash, nil
 }
 
-func (c *Chain) AddBlock(txs []*Transaction) {
+func (c *Chain) AddBlock(txs []*Transaction) *Block {
 	lastHash, err := c.lastHash()
 
 	util.HandleError(err)
@@ -65,6 +65,8 @@ func (c *Chain) AddBlock(txs []*Transaction) {
 	})
 
 	util.HandleError(err)
+
+	return newBlock
 }
 
 func DBexists() bool {
@@ -150,9 +152,8 @@ func ContinueBlockChain(address string) *Chain {
 }
 
 // FindUnspentTransactions finds all unsped transaction which belongs for address
-func (c *Chain) FindUnspentTransactions(pubKeyHash []byte) []Transaction {
-	var unspentTxs []Transaction
-
+func (c *Chain) FindUnspentTransactions() map[string]TxOutputs {
+	UTXOs := make(map[string]TxOutputs)
 	spentTXOs := make(map[string][]int)
 
 	iter := c.Iterator()
@@ -173,17 +174,15 @@ func (c *Chain) FindUnspentTransactions(pubKeyHash []byte) []Transaction {
 					}
 				}
 
-				if out.IsLockedWithKey(pubKeyHash) {
-					unspentTxs = append(unspentTxs, *tx)
-				}
+				outs := UTXOs[txID]
+				outs.Outputs = append(outs.Outputs, out)
+				UTXOs[txID] = outs
 			}
 
 			if tx.IsCoinbase() == false {
 				for _, txIn := range tx.Inputs {
-					if txIn.UsesKey(pubKeyHash) {
-						txInId := hex.EncodeToString(txIn.ID)
-						spentTXOs[txInId] = append(spentTXOs[txInId], txIn.Out)
-					}
+					txInId := hex.EncodeToString(txIn.ID)
+					spentTXOs[txInId] = append(spentTXOs[txInId], txIn.Out)
 				}
 			}
 		}
@@ -193,53 +192,7 @@ func (c *Chain) FindUnspentTransactions(pubKeyHash []byte) []Transaction {
 		}
 	}
 
-	return unspentTxs
-}
-
-// FindUTXO finds all unsped transaction outputs which belongs for address
-// FYI: UTXO it TxOutput which is not used by other input what means
-// they form user balance
-func (c *Chain) FindUTXO(pubKeyHash []byte) []TxOutput {
-	var utxos []TxOutput
-	utx := c.FindUnspentTransactions(pubKeyHash)
-
-	for _, tx := range utx {
-		for _, out := range tx.Outputs {
-			if out.IsLockedWithKey(pubKeyHash) {
-				utxos = append(utxos, out)
-			}
-		}
-	}
-
-	return utxos
-}
-
-// FindSpendableOutputs recieve address to which token should be sent and amount of token
-// returns accumlated values of tokens which can be sent, and UTXOs
-// For example 6 tokens should be sent and sum all of UTXO is 7
-// So accumulated is equal to 7
-func (c *Chain) FindSpendableOutputs(pubKeyHash []byte, amount int) (int, map[string][]int) {
-	unspentOuts := make(map[string][]int)
-	unspentTxs := c.FindUnspentTransactions(pubKeyHash)
-	accumulated := 0
-
-Work:
-	for _, tx := range unspentTxs {
-		txId := hex.EncodeToString(tx.ID)
-
-		for outIdx, out := range tx.Outputs {
-			if out.IsLockedWithKey(pubKeyHash) && accumulated < amount {
-				accumulated += out.Value
-				unspentOuts[txId] = append(unspentOuts[txId], outIdx)
-
-				if accumulated >= amount {
-					break Work
-				}
-			}
-		}
-	}
-
-	return accumulated, unspentOuts
+	return UTXOs
 }
 
 type BlockChainIterator struct {
