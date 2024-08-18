@@ -23,19 +23,6 @@ type Transaction struct {
 	Outputs []TxOutput
 }
 
-func (tx *Transaction) SetID() {
-	var encoded bytes.Buffer
-	var hash [32]byte
-
-	encode := gob.NewEncoder(&encoded)
-	err := encode.Encode(tx)
-
-	util.HandleError(err)
-
-	hash = sha256.Sum256(encoded.Bytes())
-	tx.ID = hash[:]
-}
-
 func (tx Transaction) Serialize() []byte {
 	var encoded bytes.Buffer
 
@@ -218,14 +205,18 @@ func (in *TxInput) UsesKey(pubKeyHash []byte) bool {
 // CoinbaseTx create first transaction in blockchain network
 func CoinbaseTx(to, data string) *Transaction {
 	if data == "" {
+		randData := make([]byte, 24)
+		_, err := rand.Read(randData)
+		util.HandleError(err)
+
 		data = fmt.Sprintf("Coin to %s", to)
 	}
 
 	txIn := TxInput{[]byte{}, -1, nil, []byte(data)}
-	txOut := NewTXOutput(100, to)
+	txOut := NewTXOutput(20, to)
 
 	tx := Transaction{nil, []TxInput{txIn}, []TxOutput{*txOut}}
-	tx.SetID()
+	tx.Hash()
 
 	return &tx
 }
