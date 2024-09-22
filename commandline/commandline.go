@@ -10,6 +10,7 @@ import (
 
 	"github.com/Dimashey/blockchain/blockchain"
 	"github.com/Dimashey/blockchain/internal/util"
+	"github.com/Dimashey/blockchain/network"
 	"github.com/Dimashey/blockchain/wallet"
 )
 
@@ -24,10 +25,11 @@ func (cli *CommandLine) printUsage() {
 	fmt.Println(" getbalance -address ADDRESS - get the balance for an address")
 	fmt.Println(" createblockchain -address ADDRESS creates a blockchain and sends genesis reward to address")
 	fmt.Println(" printchain - Prints the blocks in the chain")
-	fmt.Println(" send -from FROM -to TO -ammount - Send amount of coins")
+	fmt.Println(" send -from FROM -to TO -amount AMOUNT -mine - Send amount of coins. Then -mine flag is set, mine off of this node")
 	fmt.Println(" createwallet - Creates a new Wallet")
 	fmt.Println(" listaddresses - List the addresses in our wallet file")
 	fmt.Println(" reindexutxo - Rebuilds the UTXO set")
+	fmt.Println(" startnode -miner ADDRESS - Start a node with ID specified in NODE_ENV env. var. -miner enables mining")
 }
 
 func (cli *CommandLine) validateArgs() {
@@ -37,8 +39,22 @@ func (cli *CommandLine) validateArgs() {
 	}
 }
 
-func (cli *CommandLine) reindexUTXO() {
-	chain := blockchain.ContinueBlockChain("")
+func (cli *CommandLine) StartNode(nodeId, minerAddress string) {
+	fmt.Printf("Starting Node %s\n", nodeId)
+
+	if len(minerAddress) > 0 {
+		if wallet.ValidateAddress(minerAddress) {
+			fmt.Println("Mininig is on: Address to receive rewards: ", minerAddress)
+		} else {
+			log.Panic("Wrong miner address!")
+		}
+	}
+
+	network.StartServer(nodeId, minerAddress)
+}
+
+func (cli *CommandLine) reindexUTXO(nodeId string) {
+	chain := blockchain.ContinueBlockChain(nodeId)
 	defer chain.Database.Close()
 	UTXOSet := blockchain.UTXOSet{chain}
 	UTXOSet.Reindex()
@@ -47,8 +63,8 @@ func (cli *CommandLine) reindexUTXO() {
 	fmt.Printf("Done! There are %d transactions in the UTXO set.\n", count)
 }
 
-func (cli *CommandLine) printChain() {
-	chain := blockchain.ContinueBlockChain("")
+func (cli *CommandLine) printChain(nodeId string) {
+	chain := blockchain.ContinueBlockChain(nodeId)
 	defer chain.Database.Close()
 
 	iter := chain.Iterator()
@@ -75,22 +91,22 @@ func (cli *CommandLine) printChain() {
 	}
 }
 
-func (cli *CommandLine) createBlockChain(address string) {
+func (cli *CommandLine) createBlockChain(address string, nodeId string) {
 	if !wallet.ValidateAddress(address) {
 		log.Panic("Address is not Valid")
 	}
 
-	chain := blockchain.InitBlockChain(address)
+	chain := blockchain.InitBlockChain(address, nodeId)
 	chain.Database.Close()
 	fmt.Println("Finished")
 }
 
-func (cli *CommandLine) getBalance(address string) {
+func (cli *CommandLine) getBalance(address, nodeId string) {
 	if !wallet.ValidateAddress(address) {
 		log.Panic("Address is not Valid")
 	}
 
-	chain := blockchain.ContinueBlockChain(address)
+	chain := blockchain.ContinueBlockChain(nodeId)
 	defer chain.Database.Close()
 
 	UTXOSet := blockchain.UTXOSet{chain}
@@ -108,7 +124,7 @@ func (cli *CommandLine) getBalance(address string) {
 	fmt.Printf("Balance of %s: %d\n", address, balance)
 }
 
-func (cli *CommandLine) send(from, to string, amount int) {
+func (cli *CommandLine) send(from, to string, amount int, nodeId string, mineNow bool) {
 	if !wallet.ValidateAddress(from) {
 		log.Panic("Address is not Valid")
 	}
@@ -116,20 +132,31 @@ func (cli *CommandLine) send(from, to string, amount int) {
 		log.Panic("Address is not Valid")
 	}
 
-	chain := blockchain.ContinueBlockChain(from)
+	chain := blockchain.ContinueBlockChain(nodeId)
 	UTXOSet := blockchain.UTXOSet{chain}
 	defer chain.Database.Close()
 
-	tx := blockchain.NewTransaction(from, to, amount, &UTXOSet)
-	cbTx := blockchain.CoinbaseTx(from, "")
-	block := chain.AddBlock([]*blockchain.Transaction{cbTx, tx})
-	UTXOSet.Update(block)
+	wallets, err := wallet.CreateWallets(nodeId)
+	util.HandleError(err)
+
+	wallet := wallets.GetWallet(from)
+	tx := blockchain.NewTransaction(&wallet, to, amount, &UTXOSet)
+
+	if mineNow {
+		cbTx := blockchain.CoinbaseTx(from, "")
+		txs := []*blockchain.Transaction{cbTx, tx}
+		block := chain.MineBlock(txs)
+		UTXOSet.Update(block)
+	} else {
+		network.SendTx(network.KnownNodes[0], tx)
+		fmt.Println("send tx")
+	}
 
 	fmt.Println("Success!")
 }
 
-func (cli *CommandLine) listAddresses() {
-	wallets, _ := wallet.CreateWallets()
+func (cli *CommandLine) listAddresses(nodeId string) {
+	wallets, _ := wallet.CreateWallets(nodeId)
 	addresses := wallets.GetAllAddresses()
 
 	for _, address := range addresses {
@@ -137,10 +164,10 @@ func (cli *CommandLine) listAddresses() {
 	}
 }
 
-func (cli *CommandLine) createWallet() {
-	wallets, _ := wallet.CreateWallets()
+func (cli *CommandLine) createWallet(nodeId string) {
+	wallets, _ := wallet.CreateWallets(nodeId)
 	address := wallets.AddWallet()
-	wallets.SaveFile()
+	wallets.SaveFile(nodeId)
 
 	fmt.Printf("New address is: %s\n", address)
 }
@@ -148,22 +175,43 @@ func (cli *CommandLine) createWallet() {
 func (cli *CommandLine) Run() {
 	cli.validateArgs()
 
+	nodeId := os.Getenv("NODE_ID")
+
+	if nodeId == "" {
+		fmt.Printf("NODE_ID env is not set!")
+		runtime.Goexit()
+	}
+
 	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
 	createBlockchainCmd := flag.NewFlagSet("createblockchain", flag.ExitOnError)
 	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
 	printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
+	createWalletCmd := flag.NewFlagSet("createwallet", flag.ExitOnError)
+	listAddressesCmd := flag.NewFlagSet("listaddresses", flag.ExitOnError)
+	reindexUTXOCmd := flag.NewFlagSet("reindexutxo", flag.ExitOnError)
+	startNodeCmd := flag.NewFlagSet("startnode", flag.ExitOnError)
 
-	getBalanceAddress := getBalanceCmd.String("address", "", "The address to send genesis block reward to")
-	createBlockchainAddress := createBlockchainCmd.String("address", "", "The address to send genesis block rewared to")
+	getBalanceAddress := getBalanceCmd.String("address", "", "The address to get balance for")
+	createBlockchainAddress := createBlockchainCmd.String("address", "", "The address to send genesis block reward to")
 	sendFrom := sendCmd.String("from", "", "Source wallet address")
 	sendTo := sendCmd.String("to", "", "Destination wallet address")
 	sendAmount := sendCmd.Int("amount", 0, "Amount to send")
-	createWalletCmd := flag.NewFlagSet("createwallet", flag.ExitOnError)
-	listAddressesCmd := flag.NewFlagSet("listaddresses", flag.ExitOnError)
+	sendMine := sendCmd.Bool("mine", false, "Mine immediately on the same node")
+	startNodeMiner := startNodeCmd.String("miner", "", "Enable mining mode and send reward to ADDRESS")
 
 	switch os.Args[1] {
+	case "reindexutxo":
+		err := reindexUTXOCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
 	case "getbalance":
 		err := getBalanceCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
+	case "startnode":
+		err := startNodeCmd.Parse(os.Args[2:])
 		if err != nil {
 			log.Panic(err)
 		}
@@ -203,7 +251,7 @@ func (cli *CommandLine) Run() {
 			runtime.Goexit()
 		}
 
-		cli.getBalance(*getBalanceAddress)
+		cli.getBalance(*getBalanceAddress, nodeId)
 	}
 
 	if createBlockchainCmd.Parsed() {
@@ -211,11 +259,11 @@ func (cli *CommandLine) Run() {
 			createBlockchainCmd.Usage()
 			runtime.Goexit()
 		}
-		cli.createBlockChain(*createBlockchainAddress)
+		cli.createBlockChain(*createBlockchainAddress, nodeId)
 	}
 
 	if printChainCmd.Parsed() {
-		cli.printChain()
+		cli.printChain(nodeId)
 	}
 
 	if sendCmd.Parsed() {
@@ -224,14 +272,29 @@ func (cli *CommandLine) Run() {
 			runtime.Goexit()
 		}
 
-		cli.send(*sendFrom, *sendTo, *sendAmount)
+		cli.send(*sendFrom, *sendTo, *sendAmount, nodeId, *sendMine)
 	}
 
 	if createWalletCmd.Parsed() {
-		cli.createWallet()
+		cli.createWallet(nodeId)
 	}
 
 	if listAddressesCmd.Parsed() {
-		cli.listAddresses()
+		cli.listAddresses(nodeId)
+	}
+
+	if reindexUTXOCmd.Parsed() {
+		cli.reindexUTXO(nodeId)
+	}
+
+	if startNodeCmd.Parsed() {
+		nodeId := os.Getenv("NODE_ID")
+
+		if nodeId == "" {
+			startNodeCmd.Usage()
+			runtime.Goexit()
+		}
+
+		cli.StartNode(nodeId, *startNodeMiner)
 	}
 }
